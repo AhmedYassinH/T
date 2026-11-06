@@ -1,0 +1,15 @@
+**/.state/
+**/__pycache__/
+*.pyc
+
+# Generated bundles and local runtime state are not source artifacts.
+/packages/
+.env
+.env.*
+!.env.example
+*.kubeconfig
+kubeconfig
+
+# Local documentation
+*.[mM][dD]
+*.markdown
