@@ -13,3 +13,9 @@ kubeconfig
 # Local documentation
 *.[mM][dD]
 *.markdown
+
+# Locally generated TLS material
+*.key
+*.pem
+*.p12
+*.pfx

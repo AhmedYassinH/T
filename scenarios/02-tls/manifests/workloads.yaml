@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tls-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: tls-api}
+  template:
+    metadata:
+      labels: {app: tls-api}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: api
+          image: python:3.12.16-alpine3.24
+          imagePullPolicy: IfNotPresent
+          command: [python, -u, /app/app.py]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: {fieldPath: metadata.name}
+            - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+          ports:
+            - {name: https, containerPort: 8443}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 96Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          readinessProbe:
+            tcpSocket: {port: https}
+            periodSeconds: 2
+          livenessProbe:
+            tcpSocket: {port: https}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - {name: code, mountPath: /app, readOnly: true}
+            - {name: tls, mountPath: /etc/api-tls, readOnly: true}
+      volumes:
+        - name: code
+          configMap: {name: tls-api-code}
+        - name: tls
+          secret: {secretName: api-tls}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tls-api
+spec:
+  type: ClusterIP
+  selector: {app: tls-api}
+  ports:
+    - {name: https, port: 443, targetPort: https, protocol: TCP}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tls-gateway
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: tls-gateway}
+  template:
+    metadata:
+      labels: {app: tls-gateway}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: nginx
+          image: nginx:1.30.6-alpine3.24
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: https, containerPort: 8443}
+            - {name: health, containerPort: 8080}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 64Mi}
+          readinessProbe:
+            httpGet: {path: /healthz, port: health}
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - {name: tls, mountPath: /etc/lab-tls, readOnly: true}
+            - {name: upstream-trust, mountPath: /etc/upstream-trust, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: tls-gateway-config}
+        - name: tls
+          secret: {secretName: portal-tls}
+        - name: upstream-trust
+          configMap: {name: lab-root-ca}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tls-gateway
+spec:
+  type: ClusterIP
+  selector: {app: tls-gateway}
+  ports:
+    - {name: https, port: 443, targetPort: https, protocol: TCP}
