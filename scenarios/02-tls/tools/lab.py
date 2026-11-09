@@ -163,12 +163,19 @@ class Lab:
             time.sleep(3)
         raise LabError(f"Timed out waiting for {description}: {last_error}")
 
-    def mounted_certificate_matches(self):
-        mounted = self.k("exec", "deployment/tls-gateway", "--", "cat", "/etc/lab-tls/tls.crt").stdout
-        return fingerprint(mounted) == fingerprint(self.secret_data()["tls.crt"])
+    def mounted_secret_matches(self):
+        expected = self.secret_data()
+        mounted_chain = self.k("exec", "deployment/tls-gateway", "--", "cat", "/etc/lab-tls/tls.crt").stdout
+        # The chain case changes only the bundle, keeping the same leaf and key.
+        # A leaf fingerprint cannot establish that this update has been projected.
+        if mounted_chain.strip() != expected["tls.crt"].strip():
+            return False
+        mounted_key = self.k("exec", "deployment/tls-gateway", "--", "cat", "/etc/lab-tls/tls.key").stdout
+        # Compare internally; never print either key or include it in diagnostics.
+        return mounted_key.strip() == expected["tls.key"].strip()
 
     def reload_gateway(self):
-        self.wait_for("Secret projection to reach the gateway", self.mounted_certificate_matches, seconds=180)
+        self.wait_for("the complete Secret chain and key to reach the gateway", self.mounted_secret_matches, seconds=180)
         self.k("exec", "deployment/tls-gateway", "--", "nginx", "-t")
         self.k("exec", "deployment/tls-gateway", "--", "nginx", "-s", "reload")
 
@@ -325,7 +332,7 @@ class Lab:
             shutil.copyfile(PKI / "alternate-root.crt", STATE / "client-ca.crt")
         elif fault == "stale":
             self.secret("portal-tls", PKI / "renewed.fullchain.crt", PKI / "renewed.key")
-            self.wait_for("renewed Secret projection", self.mounted_certificate_matches, seconds=180)
+            self.wait_for("complete renewed Secret projection", self.mounted_secret_matches, seconds=180)
         elif fault == "upstream":
             config = (LAB / "manifests/gateway.conf").read_text().replace(
                 "proxy_ssl_name api.lab.test;", "proxy_ssl_name old-api.lab.test;")
@@ -342,8 +349,10 @@ class Lab:
                 self.served_fingerprint()
             except ssl.SSLCertVerificationError as error:
                 expected = {"expired": (10,), "hostname": (62, 64), "chain": (20, 21), "trust": (20, 21)}
-                return error.verify_code in expected[fault]
-            return False
+                require(error.verify_code in expected[fault],
+                        f"Expected the {fault} verification failure, but got TLS error {error.verify_code}: {error.verify_message}")
+                return True
+            raise LabError(f"Expected the {fault} verification failure, but portal TLS still verifies")
         if fault == "stale":
             return (self.app_response()["fingerprint"] == fingerprint((PKI / "current.crt").read_text())
                     and fingerprint(self.secret_data()["tls.crt"]) == fingerprint((PKI / "renewed.crt").read_text()))
