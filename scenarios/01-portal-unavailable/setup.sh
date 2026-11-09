@@ -74,18 +74,4 @@ printf 'ready\n' > "$STATE_DIR/prepared"
 trap - ERR
 printf '\nScenario ready. The portal incident has been reproduced.\n'
 printf 'The recovery validator is expected to FAIL until you repair the issue.\n\n'
-if [[ -f "$LAB_DIR/TASK.md" ]]; then
-    cat "$LAB_DIR/TASK.md"
-else
-    cat <<'TICKET'
-Support ticket 01: The portal returns gateway errors after configuration maintenance.
-Investigate namespace kappa-practice-01 and restore the client-to-API request path.
-Keep the existing gateway, API configuration, health probes, and replica counts.
-Both API replicas must remain healthy; status and measurement requests must work
-through the gateway. Do not bypass the gateway or hard-code pod addresses.
-
-Reproduce: bash request.sh
-Validate:  bash validate.sh
-Reference repair if stuck: bash solution.sh
-TICKET
-fi
+bash "$LAB_DIR/task.sh"
