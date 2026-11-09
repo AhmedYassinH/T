@@ -273,6 +273,13 @@ class Lab:
     def task(self):
         require(self.session.get("prepared"), "Setup has not finished; inspect errors and reset after fixing prerequisites")
         print(f"\nScenario 03: sample automation jobs fail with name-resolution errors.\nNamespace: {NS}")
+        print("\nSystem: a fictional automation worker asks a dependency API to complete a sample calculation.")
+        print("Intended path: job-worker Pod -> catalog-api Service:8080 -> catalog-api Pod.")
+        print(f"Both Deployments and the Service belong to namespace {NS}.")
+        print("The worker reads DEPENDENCY_HOST from ConfigMap worker-settings when its container starts.")
+        print("request.sh runs one fresh job inside that worker using its current environment; it is not a separate client configuration.")
+        print("In its JSON output, host is the worker's configured destination; nonce is a fresh request ID echoed by the API.")
+        print("Success means the API completes the job and returns the matching request ID and sample result.\n")
         print("The dependency is running. Investigate from the worker's network context and restore jobs using DNS.")
         print("Keep the supplied workloads, source code, Service, and worker-settings configuration mechanism.")
         print("Do not hard-code IPs, add host aliases, or change shared DNS/other scenarios.")
