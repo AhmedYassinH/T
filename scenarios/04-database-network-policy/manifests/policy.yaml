@@ -1,0 +1,14 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: report-db-ingress
+spec:
+  podSelector:
+    matchLabels: {app: report-db}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {role: report-reader}
+      ports:
+        - {protocol: TCP, port: 5432}
