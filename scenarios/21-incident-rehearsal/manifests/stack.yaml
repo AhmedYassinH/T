@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: worker-settings
+    data:
+      JOB_HOST: telemetry-api
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: telemetry-api
+    spec:
+      replicas: 1
+      selector:
+        matchLabels: {app: telemetry-api}
+      template:
+        metadata:
+          labels: {app: telemetry-api}
+        spec: &app
+          automountServiceAccountToken: false
+          containers:
+            - &container
+              name: app
+              image: python:3.12.16-alpine3.24
+              command: [python, -u, /app/service.py]
+              env:
+                - {name: ROLE, value: api}
+              ports:
+                - {name: http, containerPort: 8080}
+              readinessProbe:
+                httpGet: {path: /healthz, port: http}
+                periodSeconds: 2
+              resources:
+                requests: {cpu: 20m, memory: 24Mi}
+                limits: {cpu: 200m, memory: 64Mi}
+              volumeMounts:
+                - {name: app, mountPath: /app, readOnly: true}
+          volumes:
+            - name: app
+              configMap: {name: rehearsal-code}
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: operations-portal
+    spec:
+      replicas: 1
+      selector:
+        matchLabels: {app: operations-portal}
+      template:
+        metadata:
+          labels: {app: operations-portal}
+        spec:
+          <<: *app
+          containers:
+            - <<: *container
+              env:
+                - {name: ROLE, value: portal}
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: job-worker
+    spec:
+      replicas: 1
+      selector:
+        matchLabels: {app: job-worker}
+      template:
+        metadata:
+          labels: {app: job-worker}
+        spec:
+          <<: *app
+          containers:
+            - <<: *container
+              env:
+                - {name: ROLE, value: worker}
+              envFrom:
+                - configMapRef: {name: worker-settings}
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: telemetry-api
+    spec:
+      selector: {app: telemetry-api}
+      ports:
+        - &port {name: http, port: 80, targetPort: http}
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: operations-portal
+    spec:
+      selector: {app: operations-portal}
+      ports:
+        - *port
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: job-worker
+    spec:
+      selector: {app: job-worker}
+      ports:
+        - *port
