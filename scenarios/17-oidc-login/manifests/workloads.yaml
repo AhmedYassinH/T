@@ -1,0 +1,128 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: identity-demo}
+data:
+  dex.yaml: |
+    issuer: http://login-idp:5556/dex
+    storage: {type: memory}
+    web: {http: "0.0.0.0:5556"}
+    oauth2: {skipApprovalScreen: true}
+    enablePasswordDB: true
+    staticClients:
+      - id: training-portal
+        name: Training portal
+        secret: kappa17-demo-client-secret
+        redirectURIs: ["http://login-portal:4180/oauth2/callback"]
+    staticPasswords:
+      - email: operator@example.test
+        hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+        username: operator
+        userID: "ee91574e-3f45-42e6-8dd7-05d128b74b9a"
+        emailVerified: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: portal-login-settings}
+data: {redirect-url: "http://login-portal:4180/oauth2/callback"}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: login-idp}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: login-idp}
+  template:
+    metadata:
+      labels: {app: login-idp}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.45.1
+          command: [dex, serve, /etc/demo/dex.yaml]
+          ports: [{name: http, containerPort: 5556}]
+          readinessProbe:
+            httpGet: {path: /dex/.well-known/openid-configuration, port: http}
+            periodSeconds: 2
+          volumeMounts: [{name: config, mountPath: /etc/demo, readOnly: true}]
+      volumes:
+        - name: config
+          configMap: {name: identity-demo}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: login-idp}
+spec:
+  selector: {app: login-idp}
+  ports: [{name: http, port: 5556, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: login-portal}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: login-portal}
+  template:
+    metadata:
+      labels: {app: login-portal}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: oauth
+          image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.6
+          args:
+            - --provider=oidc
+            - --oidc-issuer-url=http://login-idp:5556/dex
+            - --scope=openid email profile
+            - --client-id=training-portal
+            - --client-secret=kappa17-demo-client-secret
+            - --http-address=0.0.0.0:4180
+            - --upstream=http://login-backend:8080
+            - --email-domain=example.test
+            - --cookie-secret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+            - --cookie-secure=false
+          env:
+            - name: OAUTH2_PROXY_REDIRECT_URL
+              valueFrom:
+                configMapKeyRef: {name: portal-login-settings, key: redirect-url}
+          ports: [{name: http, containerPort: 4180}]
+          readinessProbe: {httpGet: {path: /ping, port: http}, periodSeconds: 2}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: login-portal}
+spec:
+  selector: {app: login-portal}
+  ports: [{name: http, port: 4180, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: login-backend}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: login-backend}
+  template:
+    metadata:
+      labels: {app: login-backend}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: report
+          image: python:3.12.16-alpine3.24
+          command: [python, -u, /app/report.py]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 2}
+          volumeMounts: [{name: code, mountPath: /app, readOnly: true}]
+      volumes:
+        - name: code
+          configMap: {name: login-demo-code}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: login-backend}
+spec:
+  selector: {app: login-backend}
+  ports: [{name: http, port: 8080, targetPort: http}]
