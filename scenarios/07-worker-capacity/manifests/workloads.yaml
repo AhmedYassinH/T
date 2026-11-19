@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: batch-worker
+spec:
+  replicas: 2
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: batch-worker}
+  template:
+    metadata:
+      labels: {app: batch-worker}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: worker
+          image: python:3.12.16-alpine3.24
+          command: [python, -u, /app/worker.py]
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 2
+          resources:
+            requests: {cpu: 25m, memory: 16Mi}
+            limits: {cpu: 200m, memory: 96Mi}
+          volumeMounts:
+            - {name: code, mountPath: /app, readOnly: true}
+      volumes:
+        - name: code
+          configMap: {name: batch-code}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: batch-worker
+spec:
+  selector: {app: batch-worker}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: batch-client
+spec:
+  automountServiceAccountToken: false
+  containers:
+    - name: client
+      image: python:3.12.16-alpine3.24
+      command: [sleep, "86400"]
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+        limits: {cpu: 100m, memory: 48Mi}
