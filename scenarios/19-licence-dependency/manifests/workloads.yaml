@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: feature-settings}
+data: {endpoint: "http://demo-licence:8080"}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: demo-licence-policy}
+data: {seats: "1"}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: demo-licence}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: demo-licence}}
+  template:
+    metadata: {labels: {app: demo-licence}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: demo
+          image: python:3.12.16-alpine3.24
+          command: [python, -u, /app/lease_demo.py, serve]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 2}
+          env: []
+          resources:
+            requests: {cpu: 20m, memory: 24Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts:
+            - {name: code, mountPath: /app, readOnly: true}
+            - {name: policy, mountPath: /policy, readOnly: true}
+      volumes:
+        - name: code
+          configMap: {name: lease-demo-code}
+        - name: policy
+          configMap: {name: demo-licence-policy}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: demo-licence}
+spec:
+  selector: {app: demo-licence}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: licensed-report}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: licensed-report}}
+  template:
+    metadata: {labels: {app: licensed-report}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: demo
+          image: python:3.12.16-alpine3.24
+          command: [sleep, "86400"]
+          env:
+            - name: LICENSE_ENDPOINT
+              valueFrom:
+                configMapKeyRef: {name: feature-settings, key: endpoint}
+          resources:
+            requests: {cpu: 20m, memory: 24Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts:
+            - {name: code, mountPath: /app, readOnly: true}
+      volumes:
+        - name: code
+          configMap: {name: lease-demo-code}
