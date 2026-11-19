@@ -8,36 +8,20 @@ umask 077
 
 print_ticket() {
     cat <<'TICKET'
-Support ticket 04 · Database timeouts after a security rollout
+Scenario 04 · Reports time out after a network change
+Namespace kappa-practice-04
 
-Operations staff use a small report job to read a stored well pressure.
-Inside namespace kappa-practice-04, the flow is:
+The reporting Pod reads pressure data from PostgreSQL:
+report-app -> report-db:5432 -> PostgreSQL
+A successful report prints 210.5. PostgreSQL is Ready, but the report now
+times out after a security rollout.
 
-  report-app Pod -> report-db ClusterIP Service:5432 -> PostgreSQL Pod:5432
+Restore access for report-app. Keep test-client blocked, and keep the
+existing labels, database and Service in place.
 
-During normal operation the job uses the Service name and its SELECT-only role.
-It prints 210.5 from a seeded record. The job runs on demand in report-app.
-The unrelated test-client Pod has the same demo credentials so you can check
-network isolation separately from database authentication.
-
-Both Pods use environment settings supplied at startup. The password comes
-from report-credentials. The job script comes from the report-demo ConfigMap.
-The database is seeded at first startup and should stay running during repair.
-
-Since a network restriction was rolled out, the authorised report job times
-out. The database is Ready and the local data check works. Restore TCP 5432
-from report-app only. Keep test-client blocked and retain the original
-workloads, labels, Service, database contents and isolation boundaries.
-Work only in this namespace. Preserve DNS and use the existing Service.
-
-  bash request.sh           Run the report from inside report-app.
-  bash request.sh control   Run the same report from inside test-client.
-  bash validate.sh          Check the real report path and isolation.
-  bash hint.sh 1            Get a hint. Use 2 or 3 for more detail.
-  bash solution.sh          Apply the reference repair.
-  bash cleanup.sh           Remove only this exercise.
-
-Give a short handover with impact, evidence, the change and recovery checks.
+Try bash request.sh from this folder to run the report inside report-app.
+Use bash request.sh control for the other client and bash validate.sh
+to check both paths. Stuck? Try bash hint.sh 1, then 2 or 3.
 TICKET
 }
 
@@ -50,9 +34,9 @@ case "${1:-}" in
     hint)
         [[ $# -le 2 ]] || die "Usage: bash hint.sh [1|2|3]"
         case "${2:-1}" in
-            1) printf 'Check whether PostgreSQL is ready and whether the failure happens before authentication.\n' ;;
-            2) printf 'Compare the labels on report-app and test-client with the peers allowed by the ingress policy.\n' ;;
-            3) printf 'Allow TCP 5432 to app=report-db from role=report-reader in the same namespace. Keep all other ingress blocked.\n' ;;
+            1) printf 'Run bash request.sh. Does PostgreSQL reject the login, or does the connection time out?\n' ;;
+            2) printf 'Compare the role label on report-app with the source selector in report-db-ingress.\n' ;;
+            3) printf 'Allow role=report-reader to reach the database on TCP 5432. Check that test-client stays blocked.\n' ;;
             *) die "Choose hint level 1, 2 or 3." ;;
         esac
         exit

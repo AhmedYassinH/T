@@ -10,31 +10,19 @@ umask 077
 
 ticket() {
     cat <<'TICKET'
-Support ticket 05 · Replacement readings container does not come up
+Scenario 05 · The new collector won't start
+Namespace kappa-practice-05
 
-Field operators use a collector to confirm which well station their readings
-belong to. In namespace kappa-practice-05 the path is:
+The reading collector tells field staff which well station is active.
+collector-client -> reading-collector:80 -> collector Pod:8080
+GET /api/station should return HTTP 200 with station=well-17.
+The Deployment defines the image and reads the station from collector-settings.
 
-  collector-client Pod -> reading-collector Service:80 -> collector Pod:8080
+The replacement rollout left the collector unavailable. Get it ready again
+using python:3.12.16-alpine3.24 and the existing configuration, Service and probes.
 
-The collector normally serves GET /api/station and returns status=ok with
-station=well-17. Its source is mounted from collector-code, and its station
-ID comes from collector-settings as an environment variable at container
-startup. The Deployment specifies the image and health probes. The approved
-base image is python:3.12.16-alpine3.24 and the Service stays on port 80.
-
-After a replacement rollout, the collector is unavailable. Diagnose why the
-container does not become ready. Inspect Pod states, events and logs, and
-compare what the container needs with what the Deployment supplies.
-Keep the approved image, configuration source, probes and Service route.
-
-  bash request.sh    Request the station data from inside collector-client.
-  bash validate.sh   Verify readiness, intended configuration and live HTTP.
-  bash hint.sh 1     Get a hint. Use 2 or 3 for more detail.
-  bash solution.sh   Apply the selected case's reference repair.
-  bash cleanup.sh    Remove this exercise.
-
-Give a short handover with impact, evidence, repair and recovery checks.
+Run bash request.sh to check the Service from inside collector-client.
+Use bash validate.sh to check your fix. Stuck? Try bash hint.sh 1, then 2 or 3.
 TICKET
 }
 
@@ -131,15 +119,15 @@ validate() {
 
 hint() {
     case "${1:-1}" in
-        1) printf 'Check Pod waiting reasons and events. Did the container ever start?\n' ;;
+        1) printf 'Describe the new Pod and look at Events. Did its container ever start?\n' ;;
         2)
             case "$(cat "$STATE_DIR/prepared")" in
-                config) printf 'Compare the required ConfigMap reference with the live ConfigMap data.\n' ;;
-                image) printf 'Inspect the image pull event and compare the tag with the approved image.\n' ;;
+                config) printf 'Find the key the Deployment reads from collector-settings. Is that key present?\n' ;;
+                image) printf 'Read the image pull error. Which tag did Kubernetes try to fetch?\n' ;;
             esac ;;
         3)
             case "$(cat "$STATE_DIR/prepared")" in
-                config) printf 'Restore data.station-id=well-17 in collector-settings. The kubelet can retry container creation.\n' ;;
+                config) printf 'Set station-id to well-17 in collector-settings and wait for the Pod to become ready.\n' ;;
                 image) printf 'Restore the collector container image to %s.\n' "$IMAGE" ;;
             esac ;;
         *) die "Choose hint level 1, 2 or 3." ;;

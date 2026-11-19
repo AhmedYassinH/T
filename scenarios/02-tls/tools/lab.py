@@ -393,37 +393,20 @@ class Lab:
         self.task()
 
     def task(self):
-        require(self.session.get("prepared"), "The incident has not finished preparation. Complete setup or select a fault successfully first.")
+        require(self.session.get("prepared"), "Setup is incomplete. Run setup.sh or select a case with fault.sh.")
         fault = self.session.get("fault", "healthy")
-        print(f"\nScenario ready. Selected exercise: {fault}\n")
+        print(f"\nScenario 02 · Portal HTTPS ({fault})")
+        print(f"Namespace {NS}\n")
+        print("The operations portal serves sample readings over HTTPS.")
+        print("Client -> tls-gateway:443 (portal.lab.test) -> tls-api:443 (api.lab.test)")
+        print("Normally /api/status returns HTTP 200 and both TLS connections verify.\n")
         print(FAULTS.get(fault, "The baseline is healthy."))
-        print(f"Namespace: {NS}; portal: https://portal.lab.test/api/status")
-        print("\nSYSTEM: operations staff read sample measurements through a fictional HTTPS portal.")
-        print("NGINX is the portal entry point; a small HTTPS API supplies status and measurement data.")
-        print("No separate browser UI, database, public DNS record, or external CA service is deployed.")
-        print("Intended path: playground client -> tls-gateway Service:443 -> NGINX Pod:8443")
-        print("              -> tls-api Service:443 -> API Pod:8443. Both Deployments have one replica.")
-        print("There are TWO TLS connections: client verifies portal.lab.test; gateway verifies api.lab.test.")
-        print("Normal result: GET /api/status returns HTTP 200, app=tls-training-api, status=ok;")
-        print("GET /api/measurements returns three sample readings through the same verified gateway path.")
-        print("backend_id names the responding API Pod; nonce echoes the fresh request ID.\n")
-        print("CONFIGURATION: portal-tls is the gateway's certificate-chain/private-key Secret;")
-        print("api-tls is the API's certificate/key Secret. lab-root-ca holds the public CA for upstream trust.")
-        print("NGINX loads its mounted configuration and TLS files at start/reload; ConfigMap subPath changes need a new Pod.")
-        print(".state/pki contains disposable training fixtures, not automatically active server files.")
-        print("HELPER: request.sh runs curl on the playground node, mapping the portal name to its Service IP")
-        print("with --resolve while retaining hostname verification and using .state/client-ca.crt for trust.")
-        print("It reproduces the frontend client path; --upstream separately tests the API connection.")
-        print("A verified frontend response alone does not establish that upstream TLS is healthy.")
-        print("Workload health probes check local HTTP/TCP responses, not certificate validity.\n")
-        print("Preserve HTTPS, hostname verification, the approved CA, and upstream certificate verification.")
-        print("For renewal, keep the renewed certificate; do not revert it. Diagnose before changing resources.")
-        print("Reproduce: bash request.sh\nInspect: bash inspect.sh\nValidate: bash validate.sh")
-        print("Hints: bash hint.sh 1 (then 2 or 3). Reference repair: bash solution.sh")
-        print("Recovery validation is expected to fail before repair, including the stale-certificate case.")
-        address = self.ip("tls-gateway")
-        print("\nEquivalent manual request (from the playground node):")
-        print(f"curl --noproxy '*' --resolve portal.lab.test:443:{address} --cacert .state/client-ca.crt -i https://portal.lab.test/api/status")
+        print("Restore the portal with certificate and hostname checks enabled on both connections.")
+        if fault == "stale":
+            print("Keep the newly issued certificate active.")
+        print("\nRun bash request.sh to test from the playground node.")
+        print("Use bash inspect.sh to see the served chain and bash validate.sh to check your fix.")
+        print("Stuck? Try bash hint.sh 1, then 2 or 3.")
 
     def request(self, path, insecure=False, upstream=False, ca=None):
         require(path.startswith("/") and "\n" not in path, "Supply an API path beginning with /")
@@ -483,19 +466,45 @@ class Lab:
         print("Lab namespace and its local runtime state removed. Other scenarios are unchanged.")
 
     def hint(self, level):
-        print("Separate TCP reachability, TLS verification, HTTP response, and upstream TLS. Use curl and openssl with the intended hostname and CA.")
-        if level >= 2:
-            print({
-                "expired": "Inspect the validity dates on the certificate actually served.",
-                "hostname": "Compare the URL/SNI hostname to the served certificate's SANs.",
-                "chain": "A root trust anchor does not replace an intermediate the server must send.",
-                "trust": "Compare the client's CA file to the approved root in ConfigMap lab-root-ca.",
-                "key-mismatch": "Inspect gateway startup logs and compare certificate/key public keys.",
-                "stale": "Compare the active Secret, projected certificate, and served certificate fingerprints.",
-                "upstream": "Inspect gateway logs and the HTTPS upstream's expected hostname and trust.",
-            }.get(self.session.get("fault"), "Select a fault first."))
-        if level >= 3:
-            print("Fixture certificates are in .state/pki; the client uses .state/client-ca.crt. Active TLS Secret: portal-tls. After fixing projected files, NGINX needs a validated reload; ConfigMap subPath configuration changes need a rollout.")
+        hints = {
+            "expired": (
+                "Start with bash request.sh. What does the client object to?",
+                "Run bash inspect.sh and check the dates of the certificate the gateway actually serves.",
+                "Install a valid certificate and its matching key in portal-tls. Wait for the mount to update, then reload NGINX.",
+            ),
+            "hostname": (
+                "Which hostname is the client trying to verify?",
+                "Compare portal.lab.test with the names in the served certificate's SAN extension.",
+                "Use a certificate that includes portal.lab.test, then reload NGINX after the Secret update reaches the Pod.",
+            ),
+            "chain": (
+                "Run bash inspect.sh. Which certificates did the gateway send?",
+                "Look for the CA that signed the portal certificate. Can you build a chain to the trusted root?",
+                "Put the leaf and then its intermediate in portal-tls. Wait for the mount to update, then reload NGINX.",
+            ),
+            "trust": (
+                "Check which CA file bash request.sh uses.",
+                "Compare .state/client-ca.crt with the public root in the lab-root-ca ConfigMap.",
+                "Restore the approved root to .state/client-ca.crt. The gateway can keep its current certificate.",
+            ),
+            "key-mismatch": (
+                "The gateway won't start. What do its container logs say?",
+                "Compare the public key in the certificate with the public key derived from the private key.",
+                "Put a matching chain and key in portal-tls, then restart the gateway Deployment.",
+            ),
+            "stale": (
+                "Make a fresh request. Which certificate is the gateway serving now?",
+                "Compare the leaf fingerprint in portal-tls, the mounted file, and the live handshake.",
+                "Keep the renewed Secret. Check the mounted files, run nginx -t, then reload NGINX.",
+            ),
+            "upstream": (
+                "The client handshake succeeds. What do the gateway logs say about the API request?",
+                "Use bash inspect.sh --upstream to check the API certificate. Compare its name with the gateway's settings.",
+                "Set proxy_ssl_name to api.lab.test in tls-gateway-config and roll out new gateway Pods.",
+            ),
+        }
+        case = hints.get(self.session.get("fault"))
+        print(case[level - 1] if case else "Select a TLS case first.")
 
 
 def main():

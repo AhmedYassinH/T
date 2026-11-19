@@ -9,34 +9,21 @@ umask 077
 
 ticket() {
     cat <<'TICKET'
-Support ticket 06 · An operations dashboard change needs attention
+Scenario 06 · The dashboard update isn't live
+Namespace kappa-practice-06
 
-Field operations staff use the dashboard status API to check the active
-configuration release. All resources are in kappa-practice-06:
+Field staff check the active dashboard release at GET /api/status.
+dashboard-client -> operations-dashboard:80 -> two dashboard Pods:8080
+The response names the release and Pod. Each Pod reads dashboard-settings
+at startup. Keep both replicas, their probes and the existing Service.
 
-  dashboard-client Pod -> operations-dashboard Service:80
-                       -> two dashboard Pods:8080
-
-GET /api/status should return HTTP 200 with status=ok, the release value
-and the name of the responding Pod. The API reads release.json from
-dashboard-settings at process startup. Kubernetes uses /readyz for traffic
-eligibility and /livez for container health. The source is in dashboard-code.
-
-  bash request.sh     Query the live Service from dashboard-client.
-  bash validate.sh    Check convergence, both replicas and live responses.
-  bash hint.sh 1     Get a hint. Use 2 or 3 for more detail.
-  bash solution.sh   Apply a reference repair for the selected case.
-  bash cleanup.sh    Remove this exercise.
-
-Keep both replicas, the existing Service, health probes, configuration
-mechanism and application source. Work in this namespace. In your handover,
-say whether the live request path is still serving, how the change is stuck,
-and what evidence justifies your repair.
+Run bash request.sh to ask the Service what is live.
+Use bash validate.sh to check both replicas. Stuck? Try bash hint.sh 1, then 2 or 3.
 TICKET
     if [[ "$(cat "$STATE_DIR/prepared")" == probe ]]; then
-        printf '\nReported incident: the rollout has stalled after maintenance. The previous release v1 is still available. Restore two ready replicas.\n'
+        printf '\nThe rollout stalled after maintenance. Users can still reach v1. Restore two ready replicas.\n'
     else
-        printf '\nReported incident: configuration release v2 was approved, but requests still report v1. Complete the update and retain v2 in dashboard-settings.\n'
+        printf '\nRelease v2 was approved, but requests still show v1. Finish the update so both Pods serve v2.\n'
     fi
 }
 
@@ -160,18 +147,18 @@ with urllib.request.urlopen(f"http://{sys.argv[1]}:8080/api/status", timeout=4) 
 
 hint() {
     case "${1:-1}" in
-        1) printf 'Compare the Deployment rollout with a fresh Service response. Green existing Pods can mask a stalled change.\n' ;;
+        1) printf 'Run bash request.sh and check rollout status. Are users still reaching the previous release?\n' ;;
         2)
             if [[ "$(cat "$STATE_DIR/prepared")" == probe ]]; then
-                printf 'Read the new Pod events and compare the readiness probe path with the documented endpoint.\n'
+                printf 'Look at the new Pod events. Which readiness URL is failing?\n'
             else
-                printf 'Compare dashboard-settings with /config/release.json inside a Pod. Inspect the mount specification.\n'
+                printf 'Compare the ConfigMap with /config/release.json inside a Pod. Do they show the same release?\n'
             fi ;;
         3)
             if [[ "$(cat "$STATE_DIR/prepared")" == probe ]]; then
-                printf 'Restore readiness HTTP path /readyz in the Deployment, or roll back to the known healthy revision.\n'
+                printf 'Point readiness at /readyz or roll back to the working revision.\n'
             else
-                printf 'Retain v2 in the ConfigMap and roll out new Pods to refresh the subPath mount and the process.\n'
+                printf 'Keep v2 in the ConfigMap and restart the Deployment so new Pods mount and read it.\n'
             fi ;;
         *) die "Choose hint level 1, 2 or 3." ;;
     esac
