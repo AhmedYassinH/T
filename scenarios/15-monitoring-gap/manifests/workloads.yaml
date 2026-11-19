@@ -1,0 +1,176 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: processor-settings}
+data: {calculator-path: /api/total}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: lab-monitoring}
+data:
+  prometheus.yml: |
+    global: {scrape_interval: 3s, scrape_timeout: 2s}
+    scrape_configs:
+      - job_name: report-processor
+        static_configs: [{targets: ["report-processor:8080"]}]
+  datasource.yml: |
+    apiVersion: 1
+    datasources:
+      - name: Lab Prometheus
+        uid: lab-prom
+        type: prometheus
+        access: proxy
+        url: http://lab-prometheus:9090
+        isDefault: true
+  dashboard.yml: |
+    apiVersion: 1
+    providers:
+      - name: lab
+        type: file
+        options: {path: /opt/lab-dashboards}
+  report-health.json: |
+    {"uid":"report-health","title":"Reports health","schemaVersion":39,"refresh":"5s",
+     "panels":[{"id":1,"type":"stat","title":"Processor up",
+     "gridPos":{"x":0,"y":0,"w":12,"h":6},"datasource":{"type":"prometheus","uid":"lab-prom"},
+     "targets":[{"refId":"A","expr":"up{job=\"report-processor\"}","instant":true}]}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: report-processor}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: report-processor}
+  template:
+    metadata:
+      labels: {app: report-processor}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: http
+          image: python:3.12.16-alpine3.24
+          command: [python, -u, /app/api.py]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 2}
+          resources:
+            requests: {cpu: 20m, memory: 24Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts:
+            - {name: code, mountPath: /app, readOnly: true}
+          env:
+            - name: CALCULATOR_PATH
+              valueFrom:
+                configMapKeyRef: {name: processor-settings, key: calculator-path}
+      volumes:
+        - name: code
+          configMap: {name: job-metrics-demo}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: report-processor}
+spec:
+  selector: {app: report-processor}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: report-calculator}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: report-calculator}
+  template:
+    metadata:
+      labels: {app: report-calculator}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: http
+          image: python:3.12.16-alpine3.24
+          command: [python, -u, /app/api.py]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 2}
+          resources:
+            requests: {cpu: 20m, memory: 24Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts:
+            - {name: code, mountPath: /app, readOnly: true}
+          env: [{name: ROLE, value: calculator}]
+      volumes:
+        - name: code
+          configMap: {name: job-metrics-demo}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: report-calculator}
+spec:
+  selector: {app: report-calculator}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: lab-prometheus}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: lab-prometheus}
+  template:
+    metadata:
+      labels: {app: lab-prometheus}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.15.0
+          args: ["--config.file=/etc/lab/prometheus.yml", "--storage.tsdb.path=/tmp/lab-tsdb"]
+          ports: [{name: http, containerPort: 9090}]
+          readinessProbe: {httpGet: {path: /-/ready, port: http}, periodSeconds: 3}
+          resources:
+            requests: {cpu: 35m, memory: 48Mi}
+            limits: {cpu: 300m, memory: 240Mi}
+          volumeMounts: [{name: config, mountPath: /etc/lab, readOnly: true}]
+      volumes:
+        - name: config
+          configMap: {name: lab-monitoring, items: [{key: prometheus.yml, path: prometheus.yml}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: lab-prometheus}
+spec:
+  selector: {app: lab-prometheus}
+  ports: [{name: http, port: 9090, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: lab-grafana}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: lab-grafana}
+  template:
+    metadata:
+      labels: {app: lab-grafana}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: grafana
+          image: grafana/grafana:12.4.15
+          ports: [{name: http, containerPort: 3000}]
+          env: [{name: GF_SECURITY_ADMIN_PASSWORD, value: kappa15-demo-only}]
+          readinessProbe: {httpGet: {path: /api/health, port: http}, periodSeconds: 3}
+          resources:
+            requests: {cpu: 35m, memory: 64Mi}
+            limits: {cpu: 400m, memory: 320Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/grafana/provisioning/datasources/lab.yml, subPath: datasource.yml, readOnly: true}
+            - {name: config, mountPath: /etc/grafana/provisioning/dashboards/lab.yml, subPath: dashboard.yml, readOnly: true}
+            - {name: config, mountPath: /opt/lab-dashboards/report-health.json, subPath: report-health.json, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: lab-monitoring}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: lab-grafana}
+spec:
+  selector: {app: lab-grafana}
+  ports: [{name: http, port: 3000, targetPort: http}]
