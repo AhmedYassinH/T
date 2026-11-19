@@ -1,0 +1,100 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: connector-settings}
+data: {well: well-17}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: demo-source}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: demo-source}}
+  template:
+    metadata: {labels: {app: demo-source}}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: demo
+          image: python:3.12.16-alpine3.24
+          command: [python, -u, /app/import_demo.py, source]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 2}
+
+          resources:
+            requests: {cpu: 20m, memory: 24Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts: [{name: code, mountPath: /app, readOnly: true}]
+      volumes:
+        - name: code
+          configMap: {name: import-demo-code}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: demo-source}
+spec:
+  selector: {app: demo-source}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: reading-archive}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: reading-archive}}
+  template:
+    metadata: {labels: {app: reading-archive}}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: demo
+          image: python:3.12.16-alpine3.24
+          command: [python, -u, /app/import_demo.py, archive]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 2}
+
+          resources:
+            requests: {cpu: 20m, memory: 24Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts: [{name: code, mountPath: /app, readOnly: true}]
+      volumes:
+        - name: code
+          configMap: {name: import-demo-code}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: reading-archive}
+spec:
+  selector: {app: reading-archive}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: reading-importer}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: reading-importer}}
+  template:
+    metadata: {labels: {app: reading-importer}}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: demo
+          image: python:3.12.16-alpine3.24
+          command: [python, -u, /app/import_demo.py, loop]
+          env:
+            - name: SOURCE_WELL
+              valueFrom:
+                configMapKeyRef: {name: connector-settings, key: well}
+          resources:
+            requests: {cpu: 20m, memory: 24Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts: [{name: code, mountPath: /app, readOnly: true}]
+      volumes:
+        - name: code
+          configMap: {name: import-demo-code}
