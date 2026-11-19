@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-settings
+data:
+  release.json: '{"release":"v1"}'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: operations-dashboard
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: operations-dashboard}
+  template:
+    metadata:
+      labels: {app: operations-dashboard}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: dashboard
+          image: python:3.12.16-alpine3.24
+          command: [python, -u, /app/dashboard.py]
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 25m, memory: 24Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts:
+            - {name: code, mountPath: /app, readOnly: true}
+            - {name: settings, mountPath: /config/release.json, subPath: release.json, readOnly: true}
+      volumes:
+        - name: code
+          configMap: {name: dashboard-code}
+        - name: settings
+          configMap: {name: dashboard-settings}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: operations-dashboard
+spec:
+  type: ClusterIP
+  selector: {app: operations-dashboard}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dashboard-client
+spec:
+  automountServiceAccountToken: false
+  containers:
+    - name: client
+      image: python:3.12.16-alpine3.24
+      command: [sleep, "86400"]
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+        limits: {cpu: 100m, memory: 48Mi}
