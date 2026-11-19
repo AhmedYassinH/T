@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: Secret
+metadata: {name: demo16-auth}
+type: Opaque
+stringData: {password: kappa16-demo-password}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: source-db}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: source-db}
+  template:
+    metadata:
+      labels: {app: source-db}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: postgres
+          image: postgres:17.11-alpine3.23
+          env:
+            - {name: POSTGRES_DB, value: reports}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: demo16-auth, key: password}
+          ports: [{name: postgres, containerPort: 5432}]
+          readinessProbe:
+            exec: {command: [pg_isready, -h, 127.0.0.1, -U, postgres, -d, reports]}
+            periodSeconds: 2
+          resources:
+            requests: {cpu: 35m, memory: 48Mi}
+            limits: {cpu: 350m, memory: 160Mi}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+      volumes: [{name: data, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: source-db}
+spec:
+  selector: {app: source-db}
+  ports: [{name: postgres, port: 5432, targetPort: postgres}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: recovery-db}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: recovery-db}
+  template:
+    metadata:
+      labels: {app: recovery-db}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: postgres
+          image: postgres:17.11-alpine3.23
+          env:
+            - {name: POSTGRES_DB, value: reports}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: demo16-auth, key: password}
+          ports: [{name: postgres, containerPort: 5432}]
+          readinessProbe:
+            exec: {command: [pg_isready, -h, 127.0.0.1, -U, postgres, -d, reports]}
+            periodSeconds: 2
+          resources:
+            requests: {cpu: 35m, memory: 48Mi}
+            limits: {cpu: 350m, memory: 160Mi}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+      volumes: [{name: data, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: recovery-db}
+spec:
+  selector: {app: recovery-db}
+  ports: [{name: postgres, port: 5432, targetPort: postgres}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: reports-client}
+spec:
+  automountServiceAccountToken: false
+  containers:
+    - name: client
+      image: postgres:17.11-alpine3.23
+      command: [sleep, "86400"]
+      env:
+        - {name: PGCONNECT_TIMEOUT, value: "3"}
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef: {name: demo16-auth, key: password}
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+        limits: {cpu: 100m, memory: 64Mi}
