@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: Secret
+metadata: {name: storage-demo-auth}
+type: Opaque
+stringData: {access: demo-ingest-14, secret: kappa14-demo-s3-secret}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: importer-settings}
+data: {bucket: field-imports}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: file-store}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: file-store}
+  template:
+    metadata:
+      labels: {app: file-store}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: seaweedfs
+          image: ghcr.io/seaweedfs/seaweedfs:4.54.0
+          command: [weed, mini, -dir=/data]
+          ports:
+            - {name: s3, containerPort: 8333}
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: {name: storage-demo-auth, key: access}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: storage-demo-auth, key: secret}
+            - {name: S3_BUCKET, value: field-imports}
+          readinessProbe:
+            tcpSocket: {port: s3}
+            periodSeconds: 3
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 320Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      volumes:
+        - {name: data, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: file-store}
+spec:
+  selector: {app: file-store}
+  ports:
+    - {name: s3, port: 8333, targetPort: s3}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: file-importer}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: file-importer}
+  template:
+    metadata:
+      labels: {app: file-importer}
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+        - name: install-sdk
+          image: python:3.12.16-alpine3.24
+          command: [pip, --disable-pip-version-check, --no-cache-dir, install, --retries, "1", --target, /deps, "boto3==1.42.0"]
+          volumeMounts:
+            - {name: deps, mountPath: /deps}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+      containers:
+        - name: importer
+          image: python:3.12.16-alpine3.24
+          command: [sleep, "86400"]
+          env:
+            - {name: PYTHONPATH, value: /deps}
+            - {name: AWS_EC2_METADATA_DISABLED, value: "true"}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: {name: storage-demo-auth, key: access}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: storage-demo-auth, key: secret}
+            - name: IMPORT_BUCKET
+              valueFrom:
+                configMapKeyRef: {name: importer-settings, key: bucket}
+          resources:
+            requests: {cpu: 15m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          volumeMounts:
+            - {name: code, mountPath: /app, readOnly: true}
+            - {name: deps, mountPath: /deps, readOnly: true}
+      volumes:
+        - {name: deps, emptyDir: {}}
+        - name: code
+          configMap: {name: importer-code}
