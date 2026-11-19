@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Secret
+metadata: {name: records-demo-auth}
+type: Opaque
+stringData: {password: kappa08-demo-password}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: records-peers}
+spec:
+  clusterIP: None
+  selector: {app: records-db}
+  ports:
+    - {name: postgres, port: 5432, targetPort: postgres}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: records-db}
+spec:
+  selector: {app: records-db}
+  ports:
+    - {name: postgres, port: 5432, targetPort: postgres}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: records-db}
+spec:
+  serviceName: records-peers
+  replicas: 1
+  selector:
+    matchLabels: {app: records-db}
+  template:
+    metadata:
+      labels: {app: records-db}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: postgres
+          image: postgres:17.11-alpine3.23
+          env:
+            - {name: POSTGRES_DB, value: wells}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: records-demo-auth, key: password}
+          ports:
+            - {name: postgres, containerPort: 5432}
+          readinessProbe:
+            exec:
+              command: [pg_isready, -h, 127.0.0.1, -U, postgres, -d, wells]
+            periodSeconds: 2
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 192Mi}
+          volumeMounts:
+            - {name: records, mountPath: /var/lib/postgresql/data}
+      volumes:
+        - name: records
+          persistentVolumeClaim: {claimName: records-data}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: records-client}
+spec:
+  automountServiceAccountToken: false
+  containers:
+    - name: client
+      image: postgres:17.11-alpine3.23
+      command: [sleep, "86400"]
+      env:
+        - {name: PGHOST, value: records-db}
+        - {name: PGDATABASE, value: wells}
+        - {name: PGUSER, value: postgres}
+        - {name: PGCONNECT_TIMEOUT, value: "3"}
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef: {name: records-demo-auth, key: password}
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}
+        limits: {cpu: 100m, memory: 64Mi}
